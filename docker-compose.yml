@@ -1,0 +1,79 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: finbot
+      POSTGRES_PASSWORD: finbot
+      POSTGRES_DB: finbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres_test:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: finbot
+      POSTGRES_PASSWORD: finbot
+      POSTGRES_DB: finbot_test
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://finbot:finbot@postgres:5432/finbot
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+    working_dir: /app
+
+  worker:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://finbot:finbot@postgres:5432/finbot
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+    working_dir: /app
+
+volumes:
+  postgres_data:
