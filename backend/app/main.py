@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from app.auth.router import router as auth_router
+from app.finance.router import router as finance_router
 from app.core.database import AsyncSessionLocal, engine
 from app.core.redis import close_redis, get_redis
 
@@ -15,6 +17,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Finbot API", version="0.1.0", lifespan=lifespan)
+
+app.include_router(auth_router)
+app.include_router(finance_router)
 
 
 @app.get("/health")

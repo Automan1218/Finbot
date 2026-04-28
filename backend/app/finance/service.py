@@ -1,0 +1,219 @@
+import uuid
+from datetime import date
+from typing import Any
+
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.account import Account
+from app.models.budget import Budget
+from app.models.category import Category
+from app.models.transaction import Transaction
+
+
+async def create_account(
+    team_id: uuid.UUID, name: str, type: str, currency: str, balance_fen: int, db: AsyncSession
+) -> Account:
+    acc = Account(team_id=team_id, name=name, type=type, currency=currency, balance_fen=balance_fen)
+    db.add(acc)
+    await db.commit()
+    await db.refresh(acc)
+    return acc
+
+
+async def list_accounts(team_id: uuid.UUID, db: AsyncSession) -> list[Account]:
+    result = await db.execute(
+        select(Account).where(Account.team_id == team_id, Account.is_active == True)
+    )
+    return list(result.scalars().all())
+
+
+async def update_account(
+    account_id: uuid.UUID, team_id: uuid.UUID, fields: dict[str, Any], db: AsyncSession
+) -> Account:
+    result = await db.execute(
+        select(Account).where(Account.id == account_id, Account.team_id == team_id)
+    )
+    acc = result.scalar_one_or_none()
+    if not acc:
+        raise ValueError("Account not found")
+    for key, val in fields.items():
+        if val is not None:
+            setattr(acc, key, val)
+    await db.commit()
+    await db.refresh(acc)
+    return acc
+
+
+async def create_category(
+    team_id: uuid.UUID, name: str, icon: str | None, parent_id: uuid.UUID | None, db: AsyncSession
+) -> Category:
+    cat = Category(team_id=team_id, name=name, icon=icon, parent_id=parent_id)
+    db.add(cat)
+    await db.commit()
+    await db.refresh(cat)
+    return cat
+
+
+async def list_categories(team_id: uuid.UUID, db: AsyncSession) -> list[Category]:
+    result = await db.execute(
+        select(Category).where(
+            or_(Category.team_id == team_id, Category.team_id.is_(None))
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def create_transaction(
+    team_id: uuid.UUID,
+    account_id: uuid.UUID,
+    category_id: uuid.UUID | None,
+    amount_fen: int,
+    direction: str,
+    description: str | None,
+    transaction_date: date,
+    created_by: uuid.UUID,
+    db: AsyncSession,
+) -> Transaction:
+    tx = Transaction(
+        team_id=team_id,
+        account_id=account_id,
+        category_id=category_id,
+        amount_fen=amount_fen,
+        direction=direction,
+        description=description,
+        transaction_date=transaction_date,
+        created_by=created_by,
+    )
+    db.add(tx)
+    await db.commit()
+    await db.refresh(tx)
+    return tx
+
+
+async def list_transactions(
+    team_id: uuid.UUID,
+    date_from: date | None,
+    date_to: date | None,
+    db: AsyncSession,
+) -> list[Transaction]:
+    filters = [Transaction.team_id == team_id, Transaction.deleted_at.is_(None)]
+    if date_from:
+        filters.append(Transaction.transaction_date >= date_from)
+    if date_to:
+        filters.append(Transaction.transaction_date <= date_to)
+    result = await db.execute(
+        select(Transaction).where(and_(*filters)).order_by(Transaction.transaction_date.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def update_transaction(
+    tx_id: uuid.UUID, team_id: uuid.UUID, fields: dict[str, Any], db: AsyncSession
+) -> Transaction:
+    result = await db.execute(
+        select(Transaction).where(
+            Transaction.id == tx_id,
+            Transaction.team_id == team_id,
+            Transaction.deleted_at.is_(None),
+        )
+    )
+    tx = result.scalar_one_or_none()
+    if not tx:
+        raise ValueError("Transaction not found")
+    for key, val in fields.items():
+        if val is not None:
+            setattr(tx, key, val)
+    await db.commit()
+    await db.refresh(tx)
+    return tx
+
+
+async def soft_delete_transaction(
+    tx_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession
+) -> None:
+    from datetime import datetime
+    result = await db.execute(
+        select(Transaction).where(
+            Transaction.id == tx_id,
+            Transaction.team_id == team_id,
+            Transaction.deleted_at.is_(None),
+        )
+    )
+    tx = result.scalar_one_or_none()
+    if not tx:
+        raise ValueError("Transaction not found")
+    tx.deleted_at = datetime.utcnow()
+    await db.commit()
+
+
+async def create_budget(
+    team_id: uuid.UUID, category_id: uuid.UUID, amount_fen: int,
+    period: str, alert_threshold: float, db: AsyncSession
+) -> Budget:
+    budget = Budget(
+        team_id=team_id, category_id=category_id, amount_fen=amount_fen,
+        period=period, alert_threshold=alert_threshold,
+    )
+    db.add(budget)
+    await db.commit()
+    await db.refresh(budget)
+    return budget
+
+
+async def list_budgets(team_id: uuid.UUID, db: AsyncSession) -> list[Budget]:
+    result = await db.execute(
+        select(Budget).where(Budget.team_id == team_id, Budget.is_active == True)
+    )
+    return list(result.scalars().all())
+
+
+async def get_budget_usage(
+    budget_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession
+) -> dict:
+    from datetime import date as date_type
+    result = await db.execute(
+        select(Budget).where(Budget.id == budget_id, Budget.team_id == team_id)
+    )
+    budget = result.scalar_one_or_none()
+    if not budget:
+        raise ValueError("Budget not found")
+
+    today = date_type.today()
+    if budget.period == "monthly":
+        period_start = today.replace(day=1)
+        if today.month == 12:
+            period_end = date_type(today.year + 1, 1, 1)
+        else:
+            period_end = date_type(today.year, today.month + 1, 1)
+    else:
+        quarter = (today.month - 1) // 3
+        period_start = date_type(today.year, quarter * 3 + 1, 1)
+        if quarter == 3:
+            period_end = date_type(today.year + 1, 1, 1)
+        else:
+            period_end = date_type(today.year, (quarter + 1) * 3 + 1, 1)
+
+    spent_result = await db.execute(
+        select(func.coalesce(func.sum(Transaction.amount_fen), 0)).where(
+            and_(
+                Transaction.team_id == team_id,
+                Transaction.category_id == budget.category_id,
+                Transaction.direction == "expense",
+                Transaction.transaction_date >= period_start,
+                Transaction.transaction_date < period_end,
+                Transaction.deleted_at.is_(None),
+            )
+        )
+    )
+    spent_fen = int(spent_result.scalar() or 0)
+
+    return {
+        "budget_id": budget_id,
+        "amount_fen": budget.amount_fen,
+        "spent_fen": spent_fen,
+        "usage_ratio": spent_fen / budget.amount_fen if budget.amount_fen > 0 else 0.0,
+        "period": budget.period,
+        "period_start": period_start,
+        "period_end": period_end,
+    }

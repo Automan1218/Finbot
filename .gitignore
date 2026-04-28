@@ -28,6 +28,11 @@ Thumbs.db
 # Superpowers brainstorm sessions
 .superpowers/
 
+# Local session data and planning docs
+.claude/
+docs/
+
+
 # Secrets
 *.env
 .env.*

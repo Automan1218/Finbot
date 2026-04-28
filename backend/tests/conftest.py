@@ -42,3 +42,27 @@ async def db_session(test_engine) -> AsyncSession:
     async with SessionLocal() as session:
         yield session
         await session.rollback()
+
+
+@pytest_asyncio.fixture
+async def finance_setup(db_session):
+    import uuid as _uuid
+    from app.core.security import hash_password, create_access_token
+    from app.models.team import Team
+    from app.models.user import User
+
+    user = User(
+        email=f"fin_{_uuid.uuid4().hex[:6]}@test.com",
+        password_hash=hash_password("pw"),
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    team = Team(name="Test Fin Team", owner_id=user.id)
+    db_session.add(team)
+    await db_session.commit()
+    await db_session.refresh(user)
+    await db_session.refresh(team)
+
+    token = create_access_token(str(user.id))
+    return user, team, token
