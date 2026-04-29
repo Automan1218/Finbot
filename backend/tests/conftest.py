@@ -48,7 +48,7 @@ async def db_session(test_engine) -> AsyncSession:
 async def finance_setup(db_session):
     import uuid as _uuid
     from app.core.security import hash_password, create_access_token
-    from app.models.team import Team
+    from app.models.team import Team, TeamMember
     from app.models.user import User
 
     user = User(
@@ -60,6 +60,10 @@ async def finance_setup(db_session):
 
     team = Team(name="Test Fin Team", owner_id=user.id)
     db_session.add(team)
+    await db_session.flush()
+
+    member = TeamMember(team_id=team.id, user_id=user.id, role="owner")
+    db_session.add(member)
     await db_session.commit()
     await db_session.refresh(user)
     await db_session.refresh(team)

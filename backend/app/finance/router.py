@@ -1,17 +1,20 @@
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import get_current_user
 from app.core.database import get_db
 from app.finance import schemas, service
-from app.models.team import Team
 from app.models.user import User
+from app.teams.service import get_member_role
 
 router = APIRouter(prefix="/finance", tags=["finance"])
+
+_ADMIN_ROLES = ("owner", "admin")
+_MEMBER_ROLES = ("owner", "admin", "member")
+_ANY_ROLES = ("owner", "admin", "member", "viewer")
 
 
 async def _require_team(
@@ -19,11 +22,31 @@ async def _require_team(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> tuple[uuid.UUID, User]:
-    result = await db.execute(
-        select(Team).where(Team.id == team_id, Team.owner_id == current_user.id)
-    )
-    if not result.scalar_one_or_none():
+    role = await get_member_role(team_id, current_user.id, db)
+    if role not in _ANY_ROLES:
         raise HTTPException(status_code=403, detail="Team not found or access denied")
+    return team_id, current_user
+
+
+async def _require_member(
+    team_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> tuple[uuid.UUID, User]:
+    role = await get_member_role(team_id, current_user.id, db)
+    if role not in _MEMBER_ROLES:
+        raise HTTPException(status_code=403, detail="Member or above required")
+    return team_id, current_user
+
+
+async def _require_admin(
+    team_id: uuid.UUID = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> tuple[uuid.UUID, User]:
+    role = await get_member_role(team_id, current_user.id, db)
+    if role not in _ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admin or owner required")
     return team_id, current_user
 
 
@@ -32,7 +55,7 @@ async def _require_team(
 @router.post("/accounts", response_model=schemas.AccountResponse, status_code=201)
 async def create_account(
     body: schemas.AccountCreate,
-    ctx: tuple = Depends(_require_team),
+    ctx: tuple = Depends(_require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     team_id, _ = ctx
@@ -56,7 +79,7 @@ async def list_accounts(
 async def update_account(
     account_id: uuid.UUID,
     body: schemas.AccountUpdate,
-    ctx: tuple = Depends(_require_team),
+    ctx: tuple = Depends(_require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     team_id, _ = ctx
@@ -73,7 +96,7 @@ async def update_account(
 @router.post("/categories", response_model=schemas.CategoryResponse, status_code=201)
 async def create_category(
     body: schemas.CategoryCreate,
-    ctx: tuple = Depends(_require_team),
+    ctx: tuple = Depends(_require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return await service.create_category(
@@ -95,7 +118,7 @@ async def list_categories(
 @router.post("/transactions", response_model=schemas.TransactionResponse, status_code=201)
 async def create_transaction(
     body: schemas.TransactionCreate,
-    ctx: tuple = Depends(_require_team),
+    ctx: tuple = Depends(_require_member),
     db: AsyncSession = Depends(get_db),
 ):
     team_id, user = ctx
@@ -127,7 +150,7 @@ async def list_transactions(
 async def update_transaction(
     tx_id: uuid.UUID,
     body: schemas.TransactionUpdate,
-    ctx: tuple = Depends(_require_team),
+    ctx: tuple = Depends(_require_member),
     db: AsyncSession = Depends(get_db),
 ):
     team_id, _ = ctx
@@ -142,7 +165,7 @@ async def update_transaction(
 @router.delete("/transactions/{tx_id}", status_code=204)
 async def delete_transaction(
     tx_id: uuid.UUID,
-    ctx: tuple = Depends(_require_team),
+    ctx: tuple = Depends(_require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     team_id, _ = ctx
@@ -157,7 +180,7 @@ async def delete_transaction(
 @router.post("/budgets", response_model=schemas.BudgetResponse, status_code=201)
 async def create_budget(
     body: schemas.BudgetCreate,
-    ctx: tuple = Depends(_require_team),
+    ctx: tuple = Depends(_require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     return await service.create_budget(
