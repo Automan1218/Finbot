@@ -14,7 +14,15 @@ from app.finance.service import (
     soft_delete_transaction,
     create_budget,
     list_budgets,
+    update_budget,
+    delete_budget,
     get_budget_usage,
+    create_alert,
+    list_alerts,
+    mark_alert_read,
+    create_report,
+    list_reports,
+    get_report,
 )
 from app.models.team import Team
 from app.models.user import User
@@ -113,3 +121,60 @@ async def test_budget_usage(db_session, setup):
     assert usage["spent_fen"] == 3000
     assert usage["amount_fen"] == 10000
     assert abs(usage["usage_ratio"] - 0.3) < 0.001
+
+
+@pytest.mark.asyncio
+async def test_update_and_delete_budget(db_session, setup):
+    user, team = setup
+    cat = await create_category(team.id, "Budget Update", None, None, db_session)
+    budget = await create_budget(team.id, cat.id, 10000, "monthly", 0.8, db_session)
+
+    updated = await update_budget(
+        budget.id, team.id, {"amount_fen": 15000, "alert_threshold": 0.9}, db_session
+    )
+    assert updated.amount_fen == 15000
+    assert updated.alert_threshold == 0.9
+
+    await delete_budget(budget.id, team.id, db_session)
+    budgets = await list_budgets(team.id, db_session)
+    assert all(item.id != budget.id for item in budgets)
+
+
+@pytest.mark.asyncio
+async def test_alert_lifecycle(db_session, setup):
+    user, team = setup
+    acc = await create_account(team.id, "Alert Acc", "bank", "CNY", 0, db_session)
+    cat = await create_category(team.id, "Alert Cat", None, None, db_session)
+    budget = await create_budget(team.id, cat.id, 10000, "monthly", 0.8, db_session)
+    tx = await create_transaction(
+        team_id=team.id, account_id=acc.id, category_id=cat.id,
+        amount_fen=9000, direction="expense", description="alert",
+        transaction_date=date.today(), created_by=user.id, db=db_session,
+    )
+
+    alert = await create_alert(team.id, budget.id, tx.id, 0.9, "Budget warning", db_session)
+    unread = await list_alerts(team.id, False, db_session)
+    assert any(item.id == alert.id for item in unread)
+
+    read = await mark_alert_read(alert.id, team.id, db_session)
+    assert read.is_read is True
+
+
+@pytest.mark.asyncio
+async def test_report_lifecycle(db_session, setup):
+    user, team = setup
+    report = await create_report(
+        team_id=team.id,
+        title="Monthly",
+        period_start=date.today(),
+        period_end=date.today(),
+        content="summary",
+        raw_data={"total_expense_fen": 1000},
+        created_by=user.id,
+        db=db_session,
+    )
+
+    reports = await list_reports(team.id, db_session)
+    assert any(item.id == report.id for item in reports)
+    fetched = await get_report(report.id, team.id, db_session)
+    assert fetched.raw_data["total_expense_fen"] == 1000

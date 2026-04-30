@@ -1,6 +1,6 @@
 import uuid
-from datetime import date
-from typing import Literal
+from datetime import date, datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator
 
@@ -97,6 +97,14 @@ class BudgetCreate(BaseModel):
     alert_threshold: float = 0.8
 
 
+class BudgetUpdate(BaseModel):
+    category_id: uuid.UUID | None = None
+    amount_fen: int | None = None
+    period: Literal["monthly", "quarterly"] | None = None
+    alert_threshold: float | None = None
+    is_active: bool | None = None
+
+
 class BudgetResponse(BaseModel):
     id: uuid.UUID
     team_id: uuid.UUID
@@ -117,3 +125,30 @@ class BudgetUsage(BaseModel):
     period: str
     period_start: date
     period_end: date
+
+
+class AlertResponse(BaseModel):
+    id: uuid.UUID
+    team_id: uuid.UUID
+    budget_id: uuid.UUID
+    triggered_by: uuid.UUID
+    usage_ratio: float
+    message: str | None
+    is_read: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ReportResponse(BaseModel):
+    id: uuid.UUID
+    team_id: uuid.UUID
+    title: str | None
+    period_start: date
+    period_end: date
+    content: str | None
+    raw_data: dict[str, Any] | None
+    created_by: uuid.UUID
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

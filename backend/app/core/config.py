@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-5-mini"
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
     GITHUB_CLIENT_ID: str = ""

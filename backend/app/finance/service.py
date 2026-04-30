@@ -6,8 +6,10 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import Account
+from app.models.alert import Alert
 from app.models.budget import Budget
 from app.models.category import Category
+from app.models.report import Report
 from app.models.transaction import Transaction
 
 
@@ -74,6 +76,7 @@ async def create_transaction(
     transaction_date: date,
     created_by: uuid.UUID,
     db: AsyncSession,
+    created_by_ai: bool = False,
 ) -> Transaction:
     tx = Transaction(
         team_id=team_id,
@@ -84,6 +87,7 @@ async def create_transaction(
         description=description,
         transaction_date=transaction_date,
         created_by=created_by,
+        created_by_ai=created_by_ai,
     )
     db.add(tx)
     await db.commit()
@@ -168,6 +172,38 @@ async def list_budgets(team_id: uuid.UUID, db: AsyncSession) -> list[Budget]:
     return list(result.scalars().all())
 
 
+async def update_budget(
+    budget_id: uuid.UUID, team_id: uuid.UUID, fields: dict[str, Any], db: AsyncSession
+) -> Budget:
+    result = await db.execute(
+        select(Budget).where(Budget.id == budget_id, Budget.team_id == team_id)
+    )
+    budget = result.scalar_one_or_none()
+    if not budget:
+        raise ValueError("Budget not found")
+    for key, val in fields.items():
+        if val is not None:
+            setattr(budget, key, val)
+    await db.commit()
+    await db.refresh(budget)
+    return budget
+
+
+async def delete_budget(budget_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession) -> None:
+    result = await db.execute(
+        select(Budget).where(
+            Budget.id == budget_id,
+            Budget.team_id == team_id,
+            Budget.is_active == True,
+        )
+    )
+    budget = result.scalar_one_or_none()
+    if not budget:
+        raise ValueError("Budget not found")
+    budget.is_active = False
+    await db.commit()
+
+
 async def get_budget_usage(
     budget_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession
 ) -> dict:
@@ -217,3 +253,91 @@ async def get_budget_usage(
         "period_start": period_start,
         "period_end": period_end,
     }
+
+
+async def create_alert(
+    team_id: uuid.UUID,
+    budget_id: uuid.UUID,
+    triggered_by: uuid.UUID,
+    usage_ratio: float,
+    message: str | None,
+    db: AsyncSession,
+) -> Alert:
+    alert = Alert(
+        team_id=team_id,
+        budget_id=budget_id,
+        triggered_by=triggered_by,
+        usage_ratio=usage_ratio,
+        message=message,
+    )
+    db.add(alert)
+    await db.commit()
+    await db.refresh(alert)
+    return alert
+
+
+async def list_alerts(
+    team_id: uuid.UUID, is_read: bool | None, db: AsyncSession
+) -> list[Alert]:
+    filters = [Alert.team_id == team_id]
+    if is_read is not None:
+        filters.append(Alert.is_read == is_read)
+    result = await db.execute(
+        select(Alert).where(and_(*filters)).order_by(Alert.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def mark_alert_read(alert_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession) -> Alert:
+    result = await db.execute(
+        select(Alert).where(Alert.id == alert_id, Alert.team_id == team_id)
+    )
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise ValueError("Alert not found")
+    alert.is_read = True
+    await db.commit()
+    await db.refresh(alert)
+    return alert
+
+
+async def create_report(
+    team_id: uuid.UUID,
+    title: str | None,
+    period_start: date,
+    period_end: date,
+    content: str | None,
+    raw_data: dict[str, Any] | None,
+    created_by: uuid.UUID,
+    db: AsyncSession,
+) -> Report:
+    report = Report(
+        team_id=team_id,
+        title=title,
+        period_start=period_start,
+        period_end=period_end,
+        content=content,
+        raw_data=raw_data,
+        created_by=created_by,
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    return report
+
+
+async def list_reports(team_id: uuid.UUID, db: AsyncSession) -> list[Report]:
+    result = await db.execute(
+        select(Report).where(Report.team_id == team_id).order_by(Report.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_report(report_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession) -> Report:
+    result = await db.execute(
+        select(Report).where(Report.id == report_id, Report.team_id == team_id)
+    )
+    report = result.scalar_one_or_none()
+    if not report:
+        raise ValueError("Report not found")
+    return report

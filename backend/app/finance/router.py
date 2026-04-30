@@ -197,6 +197,35 @@ async def list_budgets(
     return await service.list_budgets(team_id, db)
 
 
+@router.patch("/budgets/{budget_id}", response_model=schemas.BudgetResponse)
+async def update_budget(
+    budget_id: uuid.UUID,
+    body: schemas.BudgetUpdate,
+    ctx: tuple = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    team_id, _ = ctx
+    try:
+        return await service.update_budget(
+            budget_id, team_id, body.model_dump(exclude_none=True), db
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/budgets/{budget_id}", status_code=204)
+async def delete_budget(
+    budget_id: uuid.UUID,
+    ctx: tuple = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    team_id, _ = ctx
+    try:
+        await service.delete_budget(budget_id, team_id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/budgets/{budget_id}/usage", response_model=schemas.BudgetUsage)
 async def budget_usage(
     budget_id: uuid.UUID,
@@ -206,5 +235,54 @@ async def budget_usage(
     team_id, _ = ctx
     try:
         return await service.get_budget_usage(budget_id, team_id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# --- Alerts ---
+
+@router.get("/alerts", response_model=list[schemas.AlertResponse])
+async def list_alerts(
+    is_read: bool | None = Query(None),
+    ctx: tuple = Depends(_require_team),
+    db: AsyncSession = Depends(get_db),
+):
+    team_id, _ = ctx
+    return await service.list_alerts(team_id, is_read, db)
+
+
+@router.patch("/alerts/{alert_id}/read", response_model=schemas.AlertResponse)
+async def mark_alert_read(
+    alert_id: uuid.UUID,
+    ctx: tuple = Depends(_require_team),
+    db: AsyncSession = Depends(get_db),
+):
+    team_id, _ = ctx
+    try:
+        return await service.mark_alert_read(alert_id, team_id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# --- Reports ---
+
+@router.get("/reports", response_model=list[schemas.ReportResponse])
+async def list_reports(
+    ctx: tuple = Depends(_require_team),
+    db: AsyncSession = Depends(get_db),
+):
+    team_id, _ = ctx
+    return await service.list_reports(team_id, db)
+
+
+@router.get("/reports/{report_id}", response_model=schemas.ReportResponse)
+async def get_report(
+    report_id: uuid.UUID,
+    ctx: tuple = Depends(_require_team),
+    db: AsyncSession = Depends(get_db),
+):
+    team_id, _ = ctx
+    try:
+        return await service.get_report(report_id, team_id, db)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
