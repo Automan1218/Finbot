@@ -66,7 +66,11 @@ async def create_message(
 
 
 @router.get("/stream/{task_id}")
-async def stream_task(task_id: uuid.UUID, redis: Redis = Depends(get_chat_redis)):
+async def stream_task(
+    task_id: uuid.UUID,
+    _: User = Depends(get_current_user),
+    redis: Redis = Depends(get_chat_redis),
+):
     async def event_generator():
         sent = 0
         while True:

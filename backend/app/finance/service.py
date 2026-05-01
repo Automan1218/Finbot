@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select
@@ -100,16 +100,48 @@ async def list_transactions(
     date_from: date | None,
     date_to: date | None,
     db: AsyncSession,
+    category_id: uuid.UUID | None = None,
+    account_id: uuid.UUID | None = None,
+    page: int | None = None,
+    size: int | None = None,
 ) -> list[Transaction]:
-    filters = [Transaction.team_id == team_id, Transaction.deleted_at.is_(None)]
-    if date_from:
-        filters.append(Transaction.transaction_date >= date_from)
-    if date_to:
-        filters.append(Transaction.transaction_date <= date_to)
-    result = await db.execute(
-        select(Transaction).where(and_(*filters)).order_by(Transaction.transaction_date.desc())
-    )
+    filters = _transaction_filters(team_id, date_from, date_to, category_id, account_id)
+    stmt = select(Transaction).where(and_(*filters)).order_by(Transaction.transaction_date.desc())
+    if page is not None and size is not None:
+        stmt = stmt.offset((page - 1) * size).limit(size)
+    result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+async def count_transactions(
+    team_id: uuid.UUID,
+    date_from: date | None,
+    date_to: date | None,
+    db: AsyncSession,
+    category_id: uuid.UUID | None = None,
+    account_id: uuid.UUID | None = None,
+) -> int:
+    filters = _transaction_filters(team_id, date_from, date_to, category_id, account_id)
+    result = await db.execute(
+        select(func.count()).select_from(Transaction).where(and_(*filters))
+    )
+    return int(result.scalar() or 0)
+
+
+async def get_transaction(
+    tx_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession
+) -> Transaction:
+    result = await db.execute(
+        select(Transaction).where(
+            Transaction.id == tx_id,
+            Transaction.team_id == team_id,
+            Transaction.deleted_at.is_(None),
+        )
+    )
+    tx = result.scalar_one_or_none()
+    if not tx:
+        raise ValueError("Transaction not found")
+    return tx
 
 
 async def update_transaction(
@@ -133,10 +165,28 @@ async def update_transaction(
     return tx
 
 
+def _transaction_filters(
+    team_id: uuid.UUID,
+    date_from: date | None,
+    date_to: date | None,
+    category_id: uuid.UUID | None,
+    account_id: uuid.UUID | None,
+) -> list[Any]:
+    filters = [Transaction.team_id == team_id, Transaction.deleted_at.is_(None)]
+    if date_from:
+        filters.append(Transaction.transaction_date >= date_from)
+    if date_to:
+        filters.append(Transaction.transaction_date <= date_to)
+    if category_id:
+        filters.append(Transaction.category_id == category_id)
+    if account_id:
+        filters.append(Transaction.account_id == account_id)
+    return filters
+
+
 async def soft_delete_transaction(
     tx_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession
 ) -> None:
-    from datetime import datetime
     result = await db.execute(
         select(Transaction).where(
             Transaction.id == tx_id,
@@ -147,7 +197,7 @@ async def soft_delete_transaction(
     tx = result.scalar_one_or_none()
     if not tx:
         raise ValueError("Transaction not found")
-    tx.deleted_at = datetime.utcnow()
+    tx.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.commit()
 
 
