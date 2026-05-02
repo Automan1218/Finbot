@@ -8,6 +8,7 @@ from redis.asyncio import Redis
 from app.agent.executor import execute_intent
 from app.agent.llm import resolve_intent
 from app.agent.tools import AgentIntent
+from app.cache.session import build_session_window
 from app.core.database import get_db_session
 
 SESSION_TTL_SECONDS = 24 * 60 * 60
@@ -56,6 +57,14 @@ async def append_message(
     await redis.rpush(key, json.dumps(message))
     await redis.expire(key, SESSION_TTL_SECONDS)
     return message
+
+
+async def get_compressed_window(
+    redis: Redis,
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    return await build_session_window(redis, user_id, conversation_id)
 
 
 async def get_history(
