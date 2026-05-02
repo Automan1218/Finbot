@@ -5,7 +5,7 @@ from typing import Any, Literal, TypedDict
 
 
 class AgentIntent(TypedDict):
-    name: Literal["record_transaction", "generate_report", "clarify"]
+    name: Literal["record_transaction", "generate_report", "rag_retrieve", "clarify"]
     arguments: dict[str, Any]
 
 
@@ -69,12 +69,28 @@ CLARIFY_TOOL = {
     },
 }
 
-FINBOT_TOOLS = [RECORD_TRANSACTION_TOOL, GENERATE_REPORT_TOOL, CLARIFY_TOOL]
+RAG_RETRIEVE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "rag_retrieve",
+        "description": "Look up team policy or knowledge documents to answer a question.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+FINBOT_TOOLS = [RECORD_TRANSACTION_TOOL, GENERATE_REPORT_TOOL, RAG_RETRIEVE_TOOL, CLARIFY_TOOL]
 
 _AMOUNT_RE = re.compile(r"(?:￥|¥|RMB|人民币)?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块|yuan)?", re.I)
 _EXPENSE_WORDS = ("花", "买", "支出", "消费", "付", "付款", "扣款")
 _INCOME_WORDS = ("收入", "工资", "收到", "进账", "报销")
 _REPORT_WORDS = ("报表", "报告", "总结", "统计")
+_RAG_WORDS = ("知识库", "政策", "制度", "标准", "流程", "限制", "规定")
 
 
 def detect_intent(message: str) -> AgentIntent:
@@ -87,6 +103,12 @@ def detect_intent(message: str) -> AgentIntent:
                 "period_end": date.today().isoformat(),
                 "group_by": "category",
             },
+        }
+
+    if any(word in text for word in _RAG_WORDS):
+        return {
+            "name": "rag_retrieve",
+            "arguments": {"query": text},
         }
 
     if any(word in text for word in (*_EXPENSE_WORDS, *_INCOME_WORDS)):

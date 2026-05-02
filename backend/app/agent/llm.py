@@ -18,6 +18,7 @@ You are Finbot's intent parser for a finance assistant.
 Choose exactly one function tool.
 Amounts in tool arguments use yuan. Dates must be ISO 8601 dates.
 Use clarify when the user intent or required fields are missing.
+Use rag_retrieve for policy, procedure, reimbursement standard, or team knowledge questions.
 Keep descriptions faithful to the user's original text.
 """.strip()
 
@@ -74,6 +75,11 @@ def normalize_intent(name: str, arguments: dict[str, Any], original_message: str
         return _normalize_record_transaction(arguments, original_message)
     if name == "generate_report":
         return _normalize_generate_report(arguments)
+    if name == "rag_retrieve":
+        return {
+            "name": "rag_retrieve",
+            "arguments": {"query": str(arguments.get("query") or original_message)},
+        }
     if name == "clarify":
         return {
             "name": "clarify",

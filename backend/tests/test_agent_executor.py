@@ -1,4 +1,5 @@
 from datetime import date
+from unittest.mock import AsyncMock
 import uuid
 
 import pytest
@@ -99,3 +100,19 @@ async def test_execute_generate_report_creates_report(db_session, setup):
     assert result["status"] == "reported"
     assert result["report_id"]
     assert result["total_expense_fen"] == 1200
+
+
+@pytest.mark.asyncio
+async def test_execute_rag_retrieve_returns_chunks(db_session, setup, monkeypatch):
+    user, team = setup
+    fake_retrieve = AsyncMock(
+        return_value=[{"id": "doc-1", "chunk_text": "policy snippet"}]
+    )
+    monkeypatch.setattr("app.agent.executor.smart_retrieve", fake_retrieve)
+
+    intent = {"name": "rag_retrieve", "arguments": {"query": "出差报销"}}
+    result = await execute_intent(intent, team.id, user.id, db_session)
+
+    assert result["status"] == "retrieved"
+    assert result["chunks"][0]["chunk_text"] == "policy snippet"
+    fake_retrieve.assert_awaited_once()

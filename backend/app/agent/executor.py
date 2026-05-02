@@ -11,6 +11,7 @@ from app.models.account import Account
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.transaction import Transaction
+from app.rag.retrieve import smart_retrieve
 
 
 async def execute_intent(
@@ -23,6 +24,8 @@ async def execute_intent(
         return await _record_transaction(intent["arguments"], team_id, user_id, db)
     if intent["name"] == "generate_report":
         return await _generate_report(intent["arguments"], team_id, user_id, db)
+    if intent["name"] == "rag_retrieve":
+        return await _rag_retrieve(intent["arguments"], team_id, db)
     return {
         "status": "needs_clarification",
         "message": intent["arguments"]["question"],
@@ -105,6 +108,29 @@ async def _generate_report(
         "report_id": str(report.id),
         "total_income_fen": total_income_fen,
         "total_expense_fen": total_expense_fen,
+    }
+
+
+async def _rag_retrieve(
+    args: dict[str, Any],
+    team_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict[str, Any]:
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return {
+            "status": "needs_clarification",
+            "message": "Please describe what you want to look up.",
+            "missing_fields": ["query"],
+        }
+    chunks = await smart_retrieve(query, team_id, db)
+    return {
+        "status": "retrieved",
+        "message": f"Retrieved {len(chunks)} relevant chunks.",
+        "chunks": [
+            {"id": str(chunk.get("id")), "chunk_text": chunk.get("chunk_text")}
+            for chunk in chunks
+        ],
     }
 
 

@@ -20,6 +20,13 @@ def test_detect_report_intent():
     assert intent["arguments"]["group_by"] == "category"
 
 
+def test_detect_rag_retrieve_intent():
+    intent = detect_intent("出差报销政策有什么限制")
+
+    assert intent["name"] == "rag_retrieve"
+    assert intent["arguments"]["query"] == "出差报销政策有什么限制"
+
+
 def test_detect_clarify_intent_when_amount_missing():
     intent = detect_intent("今天买咖啡")
 
