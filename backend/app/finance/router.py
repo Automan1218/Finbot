@@ -135,15 +135,50 @@ async def create_transaction(
     )
 
 
-@router.get("/transactions", response_model=list[schemas.TransactionResponse])
+@router.get("/transactions", response_model=schemas.TransactionListResponse)
 async def list_transactions(
     ctx: tuple = Depends(_require_team),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
+    category_id: uuid.UUID | None = Query(None),
+    account_id: uuid.UUID | None = Query(None),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     team_id, _ = ctx
-    return await service.list_transactions(team_id, date_from, date_to, db)
+    items = await service.list_transactions(
+        team_id,
+        date_from,
+        date_to,
+        db,
+        category_id=category_id,
+        account_id=account_id,
+        page=page,
+        size=size,
+    )
+    total = await service.count_transactions(
+        team_id,
+        date_from,
+        date_to,
+        db,
+        category_id=category_id,
+        account_id=account_id,
+    )
+    return {"total": total, "page": page, "size": size, "items": items}
+
+
+@router.get("/transactions/{tx_id}", response_model=schemas.TransactionResponse)
+async def get_transaction(
+    tx_id: uuid.UUID,
+    ctx: tuple = Depends(_require_team),
+    db: AsyncSession = Depends(get_db),
+):
+    team_id, _ = ctx
+    try:
+        return await service.get_transaction(tx_id, team_id, db)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.patch("/transactions/{tx_id}", response_model=schemas.TransactionResponse)

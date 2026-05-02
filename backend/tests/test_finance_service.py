@@ -10,6 +10,8 @@ from app.finance.service import (
     create_category,
     list_categories,
     create_transaction,
+    count_transactions,
+    get_transaction,
     list_transactions,
     soft_delete_transaction,
     create_budget,
@@ -102,6 +104,47 @@ async def test_list_transactions_excludes_deleted(db_session, setup):
     await soft_delete_transaction(tx.id, team.id, db_session)
     txs = await list_transactions(team.id, None, None, db_session)
     assert all(t.id != tx.id for t in txs)
+
+
+@pytest.mark.asyncio
+async def test_get_transaction_and_filtered_count(db_session, setup):
+    user, team = setup
+    acc = await create_account(team.id, "Filtered Card", "bank", "CNY", 0, db_session)
+    other_acc = await create_account(team.id, "Other Card", "bank", "CNY", 0, db_session)
+    cat = await create_category(team.id, "Filtered Cat", None, None, db_session)
+    tx = await create_transaction(
+        team_id=team.id,
+        account_id=acc.id,
+        category_id=cat.id,
+        amount_fen=1200,
+        direction="expense",
+        description="filtered",
+        transaction_date=date.today(),
+        created_by=user.id,
+        db=db_session,
+    )
+    await create_transaction(
+        team_id=team.id,
+        account_id=other_acc.id,
+        category_id=None,
+        amount_fen=900,
+        direction="expense",
+        description="other",
+        transaction_date=date.today(),
+        created_by=user.id,
+        db=db_session,
+    )
+
+    fetched = await get_transaction(tx.id, team.id, db_session)
+    filtered = await list_transactions(
+        team.id, None, None, db_session, category_id=cat.id, account_id=acc.id
+    )
+    total = await count_transactions(
+        team.id, None, None, db_session, category_id=cat.id, account_id=acc.id
+    )
+    assert fetched.id == tx.id
+    assert [item.id for item in filtered] == [tx.id]
+    assert total == 1
 
 
 @pytest.mark.asyncio

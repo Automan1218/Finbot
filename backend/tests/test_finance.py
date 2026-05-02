@@ -155,7 +155,42 @@ async def test_list_transactions(client, acc_cat):
     )
     resp = await c.get("/finance/transactions", params={"team_id": tid})
     assert resp.status_code == 200
-    assert len(resp.json()) >= 1
+    assert resp.json()["total"] >= 1
+    assert len(resp.json()["items"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_get_and_filter_transactions(client, acc_cat):
+    c, team = client
+    tid = str(team.id)
+    acc_id, cat_id = acc_cat
+    create = await c.post(
+        "/finance/transactions",
+        json={"team_id": tid, "account_id": acc_id, "category_id": cat_id,
+              "amount_fen": 1500, "direction": "expense",
+              "transaction_date": str(date.today())},
+        params={"team_id": tid},
+    )
+    tx_id = create.json()["id"]
+
+    detail = await c.get(f"/finance/transactions/{tx_id}", params={"team_id": tid})
+    assert detail.status_code == 200
+    assert detail.json()["id"] == tx_id
+
+    listed = await c.get(
+        "/finance/transactions",
+        params={
+            "team_id": tid,
+            "category_id": cat_id,
+            "account_id": acc_id,
+            "page": 1,
+            "size": 10,
+        },
+    )
+    assert listed.status_code == 200
+    data = listed.json()
+    assert data["total"] >= 1
+    assert any(item["id"] == tx_id for item in data["items"])
 
 
 @pytest.mark.asyncio
@@ -174,7 +209,7 @@ async def test_soft_delete_transaction(client, acc_cat):
     assert del_resp.status_code == 204
 
     list_resp = await c.get("/finance/transactions", params={"team_id": tid})
-    assert all(t["id"] != tx_id for t in list_resp.json())
+    assert all(t["id"] != tx_id for t in list_resp.json()["items"])
 
 
 # ---------- Budgets ----------

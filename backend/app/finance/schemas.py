@@ -89,6 +89,13 @@ class TransactionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TransactionListResponse(BaseModel):
+    total: int
+    page: int
+    size: int
+    items: list[TransactionResponse]
+
+
 class BudgetCreate(BaseModel):
     team_id: uuid.UUID
     category_id: uuid.UUID
