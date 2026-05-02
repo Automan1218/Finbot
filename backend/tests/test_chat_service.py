@@ -83,3 +83,40 @@ async def test_run_local_chat_task_adds_assistant_reply_and_done_event():
     assert [message["role"] for message in history] == ["user", "assistant"]
     assert events[-1]["status"] == "done"
     assert "报表" in events[-1]["message"]
+
+
+@pytest.mark.asyncio
+async def test_run_local_chat_task_uses_cached_llm_response(monkeypatch):
+    import json
+    from unittest.mock import AsyncMock
+
+    fake_redis = AsyncMock()
+    cached_payload = {
+        "intent": {"name": "clarify", "arguments": {"question": "cached"}},
+        "execution": None,
+        "response": "cached answer",
+    }
+
+    async def fake_get(key):
+        if key.startswith("llm:resp:") and not key.endswith(":idx"):
+            return json.dumps(cached_payload).encode("utf-8")
+        return None
+
+    fake_redis.get = AsyncMock(side_effect=fake_get)
+    fake_redis.rpush = AsyncMock()
+    fake_redis.expire = AsyncMock()
+    fake_redis.set = AsyncMock()
+    fake_redis.setex = AsyncMock()
+    fake_redis.publish = AsyncMock()
+
+    fake_resolve = AsyncMock()
+    monkeypatch.setattr("app.chat.service.resolve_intent", fake_resolve)
+
+    task_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    conv_id = uuid.uuid4()
+    team_id = uuid.uuid4()
+
+    await service.run_local_chat_task(fake_redis, task_id, user_id, conv_id, "查餐饮", team_id)
+
+    fake_resolve.assert_not_awaited()

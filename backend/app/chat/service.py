@@ -8,6 +8,8 @@ from redis.asyncio import Redis
 from app.agent.executor import execute_intent
 from app.agent.llm import resolve_intent
 from app.agent.tools import AgentIntent
+from app.cache.budget import current_year_month
+from app.cache.llm_response import get_cached_response, set_cached_response
 from app.cache.session import build_session_window
 from app.core.database import get_db_session
 
@@ -146,6 +148,26 @@ async def run_local_chat_task(
     team_id: uuid.UUID | None = None,
 ) -> None:
     try:
+        year_month = current_year_month()
+        if team_id is not None:
+            cached = await get_cached_response(redis, message, str(team_id), year_month)
+            if cached is not None:
+                await append_message(redis, user_id, conversation_id, "assistant", cached["response"])
+                await push_task_event(
+                    redis,
+                    task_id,
+                    conversation_id,
+                    step="complete",
+                    status="done",
+                    message=cached["response"],
+                    data={
+                        "intent": cached.get("intent"),
+                        "execution": cached.get("execution"),
+                        "cache": "hit",
+                    },
+                )
+                return
+
         await push_task_event(
             redis,
             task_id,
@@ -179,6 +201,14 @@ async def run_local_chat_task(
             message=response,
             data={"intent": intent, "intent_source": intent_source, "execution": execution},
         )
+        if team_id is not None and intent.get("name") != "clarify":
+            await set_cached_response(
+                redis,
+                message,
+                str(team_id),
+                year_month,
+                {"intent": intent, "execution": execution, "response": response},
+            )
     except Exception as exc:
         await push_task_event(
             redis,
