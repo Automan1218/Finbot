@@ -9,6 +9,7 @@ class ChatMessageCreate(BaseModel):
     team_id: uuid.UUID
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: uuid.UUID | None = None
+    stream: bool = False
 
 
 class ChatTaskResponse(BaseModel):

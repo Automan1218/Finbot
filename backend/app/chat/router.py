@@ -49,8 +49,9 @@ async def create_message(
         message=body.message,
         conversation_id=body.conversation_id,
     )
+    runner = service.run_streaming_chat_task if body.stream else service.run_local_chat_task
     background_tasks.add_task(
-        service.run_local_chat_task,
+        runner,
         redis,
         task_id,
         current_user.id,
