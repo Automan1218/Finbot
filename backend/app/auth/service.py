@@ -1,5 +1,5 @@
 from jose import JWTError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import security
@@ -30,6 +30,43 @@ async def authenticate_user(email: str, password: str, db: AsyncSession) -> User
         raise ValueError("Invalid credentials")
     if not user.is_active:
         raise ValueError("Account inactive")
+    return user
+
+
+async def upsert_oauth_user(
+    provider: str,
+    oauth_id: str,
+    email: str,
+    name: str | None,
+    avatar_url: str | None,
+    db: AsyncSession,
+) -> User:
+    result = await db.execute(
+        select(User).where(
+            or_(
+                User.email == email,
+                (User.oauth_provider == provider) & (User.oauth_id == oauth_id),
+            )
+        )
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        user = User(
+            email=email,
+            password_hash=None,
+            oauth_provider=provider,
+            oauth_id=oauth_id,
+            name=name,
+            avatar_url=avatar_url,
+        )
+        db.add(user)
+    else:
+        user.oauth_provider = provider
+        user.oauth_id = oauth_id
+        user.name = name or user.name
+        user.avatar_url = avatar_url or user.avatar_url
+    await db.commit()
+    await db.refresh(user)
     return user
 
 

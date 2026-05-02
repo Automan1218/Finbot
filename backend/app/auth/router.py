@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import schemas, service
 from app.auth.dependencies import get_current_user
+from app.auth.oauth import authorize_and_fetch_profile, authorize_redirect
 from app.core.database import get_db
 from app.models.user import User
 
@@ -35,6 +36,30 @@ async def refresh(body: schemas.RefreshRequest):
         access_token, refresh_token = await service.refresh_access_token(body.refresh_token)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+    return schemas.TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.get("/oauth/{provider}")
+async def oauth_login(provider: str, request: Request):
+    return await authorize_redirect(provider, request)
+
+
+@router.get("/oauth/callback", response_model=schemas.TokenResponse, name="oauth_callback")
+async def oauth_callback(
+    request: Request,
+    provider: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    profile = await authorize_and_fetch_profile(provider, request)
+    user = await service.upsert_oauth_user(
+        provider=provider,
+        oauth_id=profile["oauth_id"],
+        email=profile["email"],
+        name=profile.get("name"),
+        avatar_url=profile.get("avatar_url"),
+        db=db,
+    )
+    access_token, refresh_token = await service.create_tokens(str(user.id))
     return schemas.TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
