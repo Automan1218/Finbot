@@ -5,8 +5,11 @@ from typing import Any
 
 from redis.asyncio import Redis
 
+from app.agent.context import load_context_parallel
 from app.agent.executor import execute_intent
 from app.agent.llm import resolve_intent
+from app.agent.prompt import build_prompt
+from app.agent.streaming import stream_llm_to_sse
 from app.agent.tools import AgentIntent
 from app.cache.budget import current_year_month
 from app.cache.llm_response import get_cached_response, set_cached_response
@@ -209,6 +212,80 @@ async def run_local_chat_task(
                 year_month,
                 {"intent": intent, "execution": execution, "response": response},
             )
+    except Exception as exc:
+        await push_task_event(
+            redis,
+            task_id,
+            conversation_id,
+            step="error",
+            status="error",
+            message=str(exc),
+        )
+
+
+async def run_streaming_chat_task(
+    redis: Redis,
+    task_id: uuid.UUID,
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    message: str,
+    team_id: uuid.UUID | None = None,
+) -> None:
+    try:
+        await push_task_event(
+            redis,
+            task_id,
+            conversation_id,
+            step="load_context",
+            status="running",
+            message="Loading context",
+        )
+        async with get_db_session() as db:
+            ctx = await load_context_parallel(
+                redis=redis,
+                db=db,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                team_id=team_id,
+                query=message,
+            )
+
+        rag_text = "\n".join(
+            str(chunk.get("chunk_text", ""))
+            for chunk in ctx.get("rag", [])
+            if chunk.get("chunk_text")
+        )
+        prompt = build_prompt(
+            history=ctx.get("history", []),
+            rag_context=rag_text,
+            user_msg=message,
+        )
+
+        await push_task_event(
+            redis,
+            task_id,
+            conversation_id,
+            step="generating",
+            status="running",
+            message="Generating",
+        )
+        full_text = await stream_llm_to_sse(
+            redis=redis,
+            task_id=task_id,
+            conversation_id=conversation_id,
+            messages=prompt,
+        )
+
+        await append_message(redis, user_id, conversation_id, "assistant", full_text)
+        await push_task_event(
+            redis,
+            task_id,
+            conversation_id,
+            step="complete",
+            status="done",
+            message=full_text,
+            data={"mode": "streaming"},
+        )
     except Exception as exc:
         await push_task_event(
             redis,

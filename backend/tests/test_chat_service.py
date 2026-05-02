@@ -120,3 +120,49 @@ async def test_run_local_chat_task_uses_cached_llm_response(monkeypatch):
     await service.run_local_chat_task(fake_redis, task_id, user_id, conv_id, "查餐饮", team_id)
 
     fake_resolve.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_chat_task_publishes_deltas_and_finalizes(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    redis = FakeRedis()
+    user_id = uuid.uuid4()
+    team_id = uuid.uuid4()
+    task_id, conv_id = await service.create_chat_task(
+        redis=redis,
+        user_id=user_id,
+        team_id=team_id,
+        message="travel reimbursement limit",
+        conversation_id=None,
+    )
+
+    fake_ctx = AsyncMock(
+        return_value={
+            "history": [],
+            "rag": [{"id": "c1", "chunk_text": "Hotel limit is 500 per night."}],
+            "team_id": team_id,
+            "user_id": user_id,
+        }
+    )
+    fake_stream = AsyncMock(return_value="Hotel reimbursement limit is 500 per night.")
+    monkeypatch.setattr("app.chat.service.load_context_parallel", fake_ctx)
+    monkeypatch.setattr("app.chat.service.stream_llm_to_sse", fake_stream)
+
+    await service.run_streaming_chat_task(
+        redis=redis,
+        task_id=task_id,
+        user_id=user_id,
+        conversation_id=conv_id,
+        message="travel reimbursement limit",
+        team_id=team_id,
+    )
+
+    fake_ctx.assert_awaited_once()
+    fake_stream.assert_awaited_once()
+    history = await service.get_history(redis, user_id, conv_id)
+    events = await service.list_task_events(redis, task_id)
+    assert history[-1]["role"] == "assistant"
+    assert history[-1]["content"] == "Hotel reimbursement limit is 500 per night."
+    assert events[-1]["status"] == "done"
+    assert events[-1]["data"]["mode"] == "streaming"
