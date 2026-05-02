@@ -5,6 +5,13 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cache.budget import (
+    current_year_month,
+    get_cached_budget_summary,
+    invalidate_budget_summary,
+    set_cached_budget_summary,
+)
+from app.core.redis import get_redis
 from app.models.account import Account
 from app.models.alert import Alert
 from app.models.budget import Budget
@@ -92,6 +99,9 @@ async def create_transaction(
     db.add(tx)
     await db.commit()
     await db.refresh(tx)
+    if tx.category_id is not None:
+        redis = await get_redis()
+        await invalidate_budget_summary(redis, tx.team_id, tx.category_id, current_year_month())
     return tx
 
 
@@ -162,6 +172,9 @@ async def update_transaction(
             setattr(tx, key, val)
     await db.commit()
     await db.refresh(tx)
+    if tx.category_id is not None:
+        redis = await get_redis()
+        await invalidate_budget_summary(redis, tx.team_id, tx.category_id, current_year_month())
     return tx
 
 
@@ -199,6 +212,9 @@ async def soft_delete_transaction(
         raise ValueError("Transaction not found")
     tx.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.commit()
+    if tx.category_id is not None:
+        redis = await get_redis()
+        await invalidate_budget_summary(redis, tx.team_id, tx.category_id, current_year_month())
 
 
 async def create_budget(
@@ -257,7 +273,6 @@ async def delete_budget(budget_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSessi
 async def get_budget_usage(
     budget_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession
 ) -> dict:
-    from datetime import date as date_type
     result = await db.execute(
         select(Budget).where(Budget.id == budget_id, Budget.team_id == team_id)
     )
@@ -265,20 +280,27 @@ async def get_budget_usage(
     if not budget:
         raise ValueError("Budget not found")
 
-    today = date_type.today()
+    year_month = current_year_month()
+    redis = await get_redis()
+    cached = await get_cached_budget_summary(redis, team_id, budget.category_id, year_month)
+    if cached is not None:
+        cached["budget_id"] = budget_id
+        return cached
+
+    today = date.today()
     if budget.period == "monthly":
         period_start = today.replace(day=1)
         if today.month == 12:
-            period_end = date_type(today.year + 1, 1, 1)
+            period_end = date(today.year + 1, 1, 1)
         else:
-            period_end = date_type(today.year, today.month + 1, 1)
+            period_end = date(today.year, today.month + 1, 1)
     else:
         quarter = (today.month - 1) // 3
-        period_start = date_type(today.year, quarter * 3 + 1, 1)
+        period_start = date(today.year, quarter * 3 + 1, 1)
         if quarter == 3:
-            period_end = date_type(today.year + 1, 1, 1)
+            period_end = date(today.year + 1, 1, 1)
         else:
-            period_end = date_type(today.year, (quarter + 1) * 3 + 1, 1)
+            period_end = date(today.year, (quarter + 1) * 3 + 1, 1)
 
     spent_result = await db.execute(
         select(func.coalesce(func.sum(Transaction.amount_fen), 0)).where(
@@ -294,7 +316,7 @@ async def get_budget_usage(
     )
     spent_fen = int(spent_result.scalar() or 0)
 
-    return {
+    payload = {
         "budget_id": budget_id,
         "amount_fen": budget.amount_fen,
         "spent_fen": spent_fen,
@@ -303,6 +325,8 @@ async def get_budget_usage(
         "period_start": period_start,
         "period_end": period_end,
     }
+    await set_cached_budget_summary(redis, team_id, budget.category_id, year_month, payload)
+    return payload
 
 
 async def create_alert(
