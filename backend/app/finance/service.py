@@ -11,6 +11,11 @@ from app.cache.budget import (
     invalidate_budget_summary,
     set_cached_budget_summary,
 )
+from app.cache.categories import (
+    get_cached_categories,
+    invalidate_categories,
+    set_cached_categories,
+)
 from app.core.redis import get_redis
 from app.models.account import Account
 from app.models.alert import Alert
@@ -61,16 +66,49 @@ async def create_category(
     db.add(cat)
     await db.commit()
     await db.refresh(cat)
+    redis = await get_redis()
+    await invalidate_categories(redis, team_id)
     return cat
 
 
 async def list_categories(team_id: uuid.UUID, db: AsyncSession) -> list[Category]:
+    redis = await get_redis()
+    cached = await get_cached_categories(redis, team_id)
+    if cached is not None:
+        rebuilt: list[Category] = []
+        for row in cached:
+            row_id = row.get("id")
+            row_team = row.get("team_id")
+            row_parent = row.get("parent_id")
+            rebuilt.append(
+                Category(
+                    id=uuid.UUID(row_id) if isinstance(row_id, str) else row_id,
+                    team_id=uuid.UUID(row_team) if isinstance(row_team, str) else row_team,
+                    name=row.get("name"),
+                    icon=row.get("icon"),
+                    parent_id=uuid.UUID(row_parent) if isinstance(row_parent, str) else row_parent,
+                )
+            )
+        return rebuilt
+
     result = await db.execute(
         select(Category).where(
             or_(Category.team_id == team_id, Category.team_id.is_(None))
         )
     )
-    return list(result.scalars().all())
+    items = list(result.scalars().all())
+    payload = [
+        {
+            "id": str(c.id),
+            "team_id": str(c.team_id) if c.team_id else None,
+            "name": c.name,
+            "icon": c.icon,
+            "parent_id": str(c.parent_id) if c.parent_id else None,
+        }
+        for c in items
+    ]
+    await set_cached_categories(redis, team_id, payload)
+    return items
 
 
 async def create_transaction(
