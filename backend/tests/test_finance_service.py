@@ -13,6 +13,7 @@ from app.finance.service import (
     count_transactions,
     get_transaction,
     list_transactions,
+    update_transaction,
     soft_delete_transaction,
     create_budget,
     list_budgets,
@@ -221,3 +222,76 @@ async def test_report_lifecycle(db_session, setup):
     assert any(item.id == report.id for item in reports)
     fetched = await get_report(report.id, team.id, db_session)
     assert fetched.raw_data["total_expense_fen"] == 1000
+
+
+@pytest.mark.asyncio
+async def test_update_ai_transaction_records_correction_feedback(
+    db_session, finance_setup
+):
+    from sqlalchemy import select
+
+    from app.models.feedback import Feedback
+
+    user, team, _ = finance_setup
+    account = await create_account(team.id, "Cash", "cash", "CNY", 0, db_session)
+    category = await create_category(team.id, "Food", None, None, db_session)
+    new_category = await create_category(team.id, "Travel", None, None, db_session)
+
+    tx = await create_transaction(
+        team_id=team.id,
+        account_id=account.id,
+        category_id=category.id,
+        amount_fen=2500,
+        direction="expense",
+        description="ai recorded",
+        transaction_date=date.today(),
+        created_by=user.id,
+        db=db_session,
+        created_by_ai=True,
+    )
+
+    await update_transaction(
+        tx.id,
+        team.id,
+        {"category_id": new_category.id},
+        db_session,
+    )
+
+    rows = (
+        await db_session.execute(select(Feedback).where(Feedback.team_id == team.id))
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].feedback_type == "correction"
+    assert rows[0].rating == -1
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_ai_transaction_records_deletion_feedback(
+    db_session, finance_setup
+):
+    from sqlalchemy import select
+
+    from app.models.feedback import Feedback
+
+    user, team, _ = finance_setup
+    account = await create_account(team.id, "Cash", "cash", "CNY", 0, db_session)
+
+    tx = await create_transaction(
+        team_id=team.id,
+        account_id=account.id,
+        category_id=None,
+        amount_fen=1500,
+        direction="expense",
+        description="ai recorded",
+        transaction_date=date.today(),
+        created_by=user.id,
+        db=db_session,
+        created_by_ai=True,
+    )
+
+    await soft_delete_transaction(tx.id, team.id, db_session)
+
+    rows = (
+        await db_session.execute(select(Feedback).where(Feedback.team_id == team.id))
+    ).scalars().all()
+    assert any(row.feedback_type == "deletion" for row in rows)

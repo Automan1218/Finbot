@@ -21,6 +21,7 @@ from app.models.account import Account
 from app.models.alert import Alert
 from app.models.budget import Budget
 from app.models.category import Category
+from app.models.feedback import Feedback
 from app.models.report import Report
 from app.models.transaction import Transaction
 
@@ -213,6 +214,19 @@ async def update_transaction(
     if tx.category_id is not None:
         redis = await get_redis()
         await invalidate_budget_summary(redis, tx.team_id, tx.category_id, current_year_month())
+    if tx.created_by_ai:
+        db.add(
+            Feedback(
+                team_id=tx.team_id,
+                user_id=tx.created_by,
+                task_id=tx.id,
+                task_type="record_transaction",
+                rating=-1,
+                feedback_type="correction",
+                corrected_output=_feedback_payload(fields),
+            )
+        )
+        await db.commit()
     return tx
 
 
@@ -235,6 +249,16 @@ def _transaction_filters(
     return filters
 
 
+def _feedback_payload(fields: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key, value in fields.items():
+        if isinstance(value, (uuid.UUID, date, datetime)):
+            payload[key] = str(value)
+        else:
+            payload[key] = value
+    return payload
+
+
 async def soft_delete_transaction(
     tx_id: uuid.UUID, team_id: uuid.UUID, db: AsyncSession
 ) -> None:
@@ -253,6 +277,18 @@ async def soft_delete_transaction(
     if tx.category_id is not None:
         redis = await get_redis()
         await invalidate_budget_summary(redis, tx.team_id, tx.category_id, current_year_month())
+    if tx.created_by_ai:
+        db.add(
+            Feedback(
+                team_id=tx.team_id,
+                user_id=tx.created_by,
+                task_id=tx.id,
+                task_type="record_transaction",
+                rating=-1,
+                feedback_type="deletion",
+            )
+        )
+        await db.commit()
 
 
 async def create_budget(
