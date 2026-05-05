@@ -23,9 +23,12 @@ Keep descriptions faithful to the user's original text.
 """.strip()
 
 
-async def resolve_intent(message: str) -> tuple[AgentIntent, str]:
+async def resolve_intent(
+    message: str,
+    system_prompt: str | None = None,
+) -> tuple[AgentIntent, str]:
     try:
-        return await detect_intent_with_openai(message), "openai"
+        return await detect_intent_with_openai(message, system_prompt=system_prompt), "openai"
     except OpenAIIntentUnavailable:
         return detect_intent(message), "rules"
     except Exception:
@@ -36,6 +39,7 @@ async def detect_intent_with_openai(
     message: str,
     client: AsyncOpenAI | None = None,
     model: str | None = None,
+    system_prompt: str | None = None,
 ) -> AgentIntent:
     if client is None and not settings.OPENAI_API_KEY:
         raise OpenAIIntentUnavailable("OPENAI_API_KEY is not configured")
@@ -44,7 +48,7 @@ async def detect_intent_with_openai(
     response = await client.chat.completions.create(
         model=model or settings.OPENAI_MODEL,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
             {"role": "user", "content": message},
         ],
         tools=FINBOT_TOOLS,

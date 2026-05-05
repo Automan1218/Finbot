@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from redis.asyncio import Redis
+from sqlalchemy import select
 
+from app.ab_test.bucket import assign_prompt_version
 from app.agent.context import load_context_parallel
 from app.agent.executor import execute_intent
 from app.agent.llm import resolve_intent
@@ -15,9 +17,11 @@ from app.cache.budget import current_year_month
 from app.cache.llm_response import get_cached_response, set_cached_response
 from app.cache.session import build_session_window
 from app.core.database import get_db_session
+from app.models.prompt_version import PromptVersion
 
 SESSION_TTL_SECONDS = 24 * 60 * 60
 TASK_TTL_SECONDS = 60 * 60
+DEFAULT_PROMPT_VERSION = "v1.0"
 
 
 def _now() -> datetime:
@@ -142,6 +146,27 @@ async def create_chat_task(
     return task_id, conversation_id
 
 
+async def _select_prompt_version(redis: Redis, team_id: uuid.UUID | None) -> str:
+    if team_id is None:
+        return DEFAULT_PROMPT_VERSION
+    if not hasattr(redis, "get"):
+        return DEFAULT_PROMPT_VERSION
+    return await assign_prompt_version(str(team_id), redis, default=DEFAULT_PROMPT_VERSION)
+
+
+async def _load_prompt_system_text(prompt_version: str) -> str | None:
+    if prompt_version == DEFAULT_PROMPT_VERSION:
+        return None
+    async with get_db_session() as db:
+        result = await db.execute(
+            select(PromptVersion).where(PromptVersion.version == prompt_version)
+        )
+        row = result.scalar_one_or_none()
+        if row and row.is_active:
+            return row.system_txt
+    return None
+
+
 async def run_local_chat_task(
     redis: Redis,
     task_id: uuid.UUID,
@@ -152,6 +177,7 @@ async def run_local_chat_task(
 ) -> None:
     try:
         year_month = current_year_month()
+        prompt_version = await _select_prompt_version(redis, team_id)
         if team_id is not None:
             cached = await get_cached_response(redis, message, str(team_id), year_month)
             if cached is not None:
@@ -167,6 +193,7 @@ async def run_local_chat_task(
                         "intent": cached.get("intent"),
                         "execution": cached.get("execution"),
                         "cache": "hit",
+                        "prompt_version": cached.get("prompt_version", prompt_version),
                     },
                 )
                 return
@@ -179,7 +206,8 @@ async def run_local_chat_task(
             status="running",
             message="Parsing request",
         )
-        intent, intent_source = await resolve_intent(message)
+        system_prompt = await _load_prompt_system_text(prompt_version)
+        intent, intent_source = await resolve_intent(message, system_prompt=system_prompt)
         execution = None
         if team_id is not None:
             await push_task_event(
@@ -202,7 +230,12 @@ async def run_local_chat_task(
             step="complete",
             status="done",
             message=response,
-            data={"intent": intent, "intent_source": intent_source, "execution": execution},
+            data={
+                "intent": intent,
+                "intent_source": intent_source,
+                "execution": execution,
+                "prompt_version": prompt_version,
+            },
         )
         if team_id is not None and intent.get("name") != "clarify":
             await set_cached_response(
@@ -210,7 +243,12 @@ async def run_local_chat_task(
                 message,
                 str(team_id),
                 year_month,
-                {"intent": intent, "execution": execution, "response": response},
+                {
+                    "intent": intent,
+                    "execution": execution,
+                    "response": response,
+                    "prompt_version": prompt_version,
+                },
             )
     except Exception as exc:
         await push_task_event(
@@ -232,6 +270,7 @@ async def run_streaming_chat_task(
     team_id: uuid.UUID | None = None,
 ) -> None:
     try:
+        prompt_version = await _select_prompt_version(redis, team_id)
         await push_task_event(
             redis,
             task_id,
@@ -250,6 +289,7 @@ async def run_streaming_chat_task(
                 query=message,
             )
 
+        system_prompt = await _load_prompt_system_text(prompt_version)
         rag_text = "\n".join(
             str(chunk.get("chunk_text", ""))
             for chunk in ctx.get("rag", [])
@@ -259,6 +299,8 @@ async def run_streaming_chat_task(
             history=ctx.get("history", []),
             rag_context=rag_text,
             user_msg=message,
+            prompt_version=prompt_version,
+            system_prompt=system_prompt,
         )
 
         await push_task_event(
@@ -268,6 +310,7 @@ async def run_streaming_chat_task(
             step="generating",
             status="running",
             message="Generating",
+            data={"prompt_version": prompt_version},
         )
         full_text = await stream_llm_to_sse(
             redis=redis,
@@ -284,7 +327,7 @@ async def run_streaming_chat_task(
             step="complete",
             status="done",
             message=full_text,
-            data={"mode": "streaming"},
+            data={"mode": "streaming", "prompt_version": prompt_version},
         )
     except Exception as exc:
         await push_task_event(

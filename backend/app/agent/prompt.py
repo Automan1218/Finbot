@@ -158,8 +158,12 @@ def build_prompt(
     history: list[dict[str, Any]],
     rag_context: str,
     user_msg: str,
+    prompt_version: str | None = None,
+    system_prompt: str | None = None,
 ) -> list[dict[str, Any]]:
-    messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system_prompt or SYSTEM_PROMPT}
+    ]
     messages.extend(FEW_SHOT_EXAMPLES)
     knowledge = rag_context.strip() if rag_context else "(none)"
     messages.append(
