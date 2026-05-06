@@ -46,3 +46,29 @@ def test_score_scenario_dispatches():
     expected_clarify = {"fn": "clarify", "missing_fields": ["amount_yuan"]}
     actual_clarify = {"fn": "clarify", "missing_fields": ["amount_yuan"]}
     assert score_scenario("clarify", actual_clarify, expected_clarify) == 1.0
+
+
+def test_score_scenario_record_batch_count_field():
+    expected = {"fn": "record_batch", "count": 3}
+    actual = {"fn": "record_batch", "count": 3}
+    assert score_scenario("record_batch", actual, expected) == 1.0
+
+    actual_partial = {"fn": "record_batch", "count": 2}
+    assert score_scenario("record_batch", actual_partial, expected) == 0.0
+
+
+def test_score_scenario_analyze_spending_compare_field():
+    expected = {"fn": "analyze_spending", "compare_with": "prev_period"}
+    actual = {"fn": "analyze_spending", "compare_with": "prev_period"}
+    assert score_scenario("analyze_spending", actual, expected) == 1.0
+
+    actual_wrong_fn = {"fn": "generate_report", "compare_with": "prev_period"}
+    assert score_scenario("analyze_spending", actual_wrong_fn, expected) == 0.0
+
+
+def test_score_scenario_check_budget_category_field():
+    expected = {"fn": "check_budget", "category": "Food & Beverage"}
+    actual_match = {"fn": "check_budget", "category": "Food & Beverage"}
+    actual_other = {"fn": "check_budget", "category": "Transportation"}
+    assert score_scenario("check_budget", actual_match, expected) == 1.0
+    assert score_scenario("check_budget", actual_other, expected) == 0.0

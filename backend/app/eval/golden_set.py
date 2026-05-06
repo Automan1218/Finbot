@@ -93,12 +93,89 @@ EVAL_CASES: list[dict] = [
             "fn": "clarify",
         },
     },
+    {
+        "id": "t011",
+        "scenario": "record_batch",
+        "input": "Today breakfast 12 lunch 35 taxi 45",
+        "expect": {
+            "fn": "record_batch",
+            "count": 3,
+        },
+    },
+    {
+        "id": "t012",
+        "scenario": "record_batch",
+        "input": "Groceries 20 taxi 15 coffee 30",
+        "expect": {
+            "fn": "record_batch",
+            "count": 3,
+        },
+    },
+    {
+        "id": "t013",
+        "scenario": "query_transactions",
+        "input": "Show this month's food expenses",
+        "expect": {
+            "fn": "query_transactions",
+            "direction": "expense",
+            "category": "Food & Beverage",
+        },
+    },
+    {
+        "id": "t014",
+        "scenario": "analyze_spending",
+        "input": "Compare this month's dining spending with last month",
+        "expect": {
+            "fn": "analyze_spending",
+            "compare_with": "prev_period",
+        },
+    },
+    {
+        "id": "t015",
+        "scenario": "analyze_spending",
+        "input": "How much did we spend each day in the last 7 days",
+        "expect": {
+            "fn": "analyze_spending",
+            "period": "last_7_days",
+            "group_by": "day",
+        },
+    },
+    {
+        "id": "t016",
+        "scenario": "check_budget",
+        "input": "How much food budget is remaining",
+        "expect": {
+            "fn": "check_budget",
+            "category": "Food & Beverage",
+        },
+    },
+    {
+        "id": "t017",
+        "scenario": "check_budget",
+        "input": "Show overall budget status",
+        "expect": {
+            "fn": "check_budget",
+        },
+    },
+    {
+        "id": "t018",
+        "scenario": "record_batch",
+        "input": "Morning subway 3, lunch 18, afternoon coffee 25",
+        "expect": {
+            "fn": "record_batch",
+            "count": 3,
+        },
+    },
 ]
 
 
 SCENARIO_THRESHOLDS = {
     "record_transaction": 0.90,
+    "record_batch": 0.85,
+    "query_transactions": 0.85,
     "generate_report": 0.85,
+    "analyze_spending": 0.85,
+    "check_budget": 0.85,
     "rag_retrieve": 0.85,
     "clarify": 0.92,
 }

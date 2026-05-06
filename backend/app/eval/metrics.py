@@ -43,4 +43,13 @@ def score_scenario(
         if not expected_missing:
             return 1.0
         return missing_field_recall(expected_missing, actual_missing)
+    if scenario == "record_batch":
+        if expected.get("fn") != actual.get("fn"):
+            return 0.0
+        expected_count = expected.get("count")
+        if expected_count is None:
+            return 1.0
+        return 1.0 if expected_count == actual.get("count") else 0.0
+    if scenario in {"analyze_spending", "check_budget"}:
+        return 1.0 if field_accuracy(expected, actual) == 1.0 else 0.0
     return field_accuracy(expected, actual)
