@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -75,8 +75,16 @@ async def detect_intent_with_openai(
 
 
 def normalize_intent(name: str, arguments: dict[str, Any], original_message: str) -> AgentIntent:
+    if name == "record_batch":
+        return _normalize_record_batch(arguments, original_message)
     if name == "record_transaction":
         return _normalize_record_transaction(arguments, original_message)
+    if name == "query_transactions":
+        return _normalize_query_transactions(arguments)
+    if name == "analyze_spending":
+        return _normalize_analyze_spending(arguments)
+    if name == "check_budget":
+        return _normalize_check_budget(arguments)
     if name == "generate_report":
         return _normalize_generate_report(arguments)
     if name == "rag_retrieve":
@@ -136,6 +144,117 @@ def _normalize_record_transaction(
             "transaction_date": transaction_date,
             "description": str(arguments.get("description") or original_message),
         },
+    }
+
+
+def _normalize_record_batch(
+    arguments: dict[str, Any], original_message: str
+) -> AgentIntent:
+    raw_items = arguments.get("transactions") or []
+    if not isinstance(raw_items, list):
+        raw_items = []
+    items: list[dict[str, Any]] = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        amount_yuan = _decimal_from_value(raw.get("amount_yuan"))
+        if amount_yuan is None:
+            continue
+        direction = raw.get("direction")
+        if direction not in {"income", "expense"}:
+            continue
+        items.append(
+            {
+                "amount_yuan": float(amount_yuan),
+                "amount_fen": yuan_to_fen(amount_yuan),
+                "direction": direction,
+                "category": str(raw.get("category") or "Uncategorized"),
+                "account_name": str(raw.get("account_name") or "Default"),
+                "transaction_date": str(
+                    raw.get("transaction_date") or date.today().isoformat()
+                ),
+                "description": str(raw.get("description") or original_message),
+            }
+        )
+    if not items:
+        return {
+            "name": "clarify",
+            "arguments": {
+                "question": "Please describe at least one transaction with amount and direction.",
+                "missing_fields": ["transactions"],
+            },
+        }
+    return {"name": "record_batch", "arguments": {"transactions": items}}
+
+
+def _normalize_query_transactions(arguments: dict[str, Any]) -> AgentIntent:
+    today = date.today()
+    direction = arguments.get("direction")
+    if direction not in {"income", "expense"}:
+        direction = None
+    raw_limit = arguments.get("limit")
+    try:
+        limit = int(raw_limit) if raw_limit is not None else 20
+    except (TypeError, ValueError):
+        limit = 20
+    limit = max(1, min(limit, 100))
+    return {
+        "name": "query_transactions",
+        "arguments": {
+            "date_from": str(arguments.get("date_from") or today.replace(day=1).isoformat()),
+            "date_to": str(arguments.get("date_to") or today.isoformat()),
+            "direction": direction,
+            "category": arguments.get("category") or None,
+            "account_name": arguments.get("account_name") or None,
+            "limit": limit,
+        },
+    }
+
+
+def _normalize_analyze_spending(arguments: dict[str, Any]) -> AgentIntent:
+    today = date.today()
+    period = arguments.get("period") or "last_30_days"
+    if period not in {"last_7_days", "last_30_days", "this_month", "custom"}:
+        period = "last_30_days"
+    if period == "custom":
+        period_start = str(arguments.get("period_start") or today.replace(day=1).isoformat())
+        period_end = str(arguments.get("period_end") or today.isoformat())
+    elif period == "last_7_days":
+        period_start = (today - timedelta(days=6)).isoformat()
+        period_end = today.isoformat()
+    elif period == "this_month":
+        period_start = today.replace(day=1).isoformat()
+        period_end = today.isoformat()
+    else:
+        period_start = (today - timedelta(days=29)).isoformat()
+        period_end = today.isoformat()
+
+    group_by = arguments.get("group_by") or "category"
+    if group_by not in {"category", "account", "day", "week"}:
+        group_by = "category"
+
+    compare_with = arguments.get("compare_with")
+    if compare_with not in {"prev_period"}:
+        compare_with = None
+
+    return {
+        "name": "analyze_spending",
+        "arguments": {
+            "period": period,
+            "period_start": period_start,
+            "period_end": period_end,
+            "group_by": group_by,
+            "compare_with": compare_with,
+        },
+    }
+
+
+def _normalize_check_budget(arguments: dict[str, Any]) -> AgentIntent:
+    raw_category = arguments.get("category")
+    category = str(raw_category).strip() if raw_category else None
+    return {
+        "name": "check_budget",
+        "arguments": {"category": category or None},
     }
 
 

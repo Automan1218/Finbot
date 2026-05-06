@@ -25,6 +25,9 @@ Stable operating contract:
 - Use relevant knowledge snippets as ground truth for policy questions. If the
   snippet does not answer the question, say that the available knowledge does
   not contain the answer. Do not invent policy limits.
+- Use batch recording when one user message contains multiple transactions.
+- Use transaction query for listing historical rows and budget check for active
+  budget usage. Use spending analysis for trends and period comparisons.
 - Preserve the user's original wording in transaction descriptions when a
   transaction is recorded.
 - Never expose unrelated personal data, credentials, tokens, or internal
@@ -140,6 +143,49 @@ FEW_SHOT_EXAMPLES: list[dict[str, str]] = [
             "Generate report: period_start=first day of current month, "
             "period_end=current date, group_by=category."
         ),
+    },
+    {
+        "role": "user",
+        "content": "Today breakfast 12, lunch 35, taxi 45.",
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "Record batch: three transactions on today, expense, account_name=Cash. "
+            "Items: amount_fen=1200 category=Food & Beverage description=breakfast; "
+            "amount_fen=3500 category=Food & Beverage description=lunch; "
+            "amount_fen=4500 category=Transportation description=taxi."
+        ),
+    },
+    {
+        "role": "user",
+        "content": "Show this month's food expenses.",
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "Query transactions: date_from=first day of current month, "
+            "date_to=current date, category=Food & Beverage, direction=expense."
+        ),
+    },
+    {
+        "role": "user",
+        "content": "Compare spending in the last 30 days with the previous period.",
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "Analyze spending: period=last_30_days, group_by=category, "
+            "compare_with=prev_period."
+        ),
+    },
+    {
+        "role": "user",
+        "content": "How much food budget is remaining?",
+    },
+    {
+        "role": "assistant",
+        "content": "Check budget: category=Food & Beverage.",
     },
 ]
 

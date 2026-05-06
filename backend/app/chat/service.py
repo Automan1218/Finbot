@@ -351,6 +351,22 @@ def _build_agent_response(
             f"已解析为{args['direction']}记录：{args['category']} "
             f"{args['amount_fen']} 分，账户 {args['account_name']}。"
         )
+    if intent["name"] == "record_batch":
+        items = intent["arguments"].get("transactions") or []
+        return f"已解析 {len(items)} 笔批量记账。"
+    if intent["name"] == "query_transactions":
+        args = intent["arguments"]
+        return f"已解析为查询：{args['date_from']} 至 {args['date_to']}。"
+    if intent["name"] == "analyze_spending":
+        args = intent["arguments"]
+        return (
+            f"已解析为支出分析：{args['period_start']} 至 {args['period_end']}，"
+            f"按 {args['group_by']} 汇总。"
+        )
+    if intent["name"] == "check_budget":
+        args = intent["arguments"]
+        scope = args.get("category") or "全部分类"
+        return f"已解析为预算检查：{scope}。"
     if intent["name"] == "generate_report":
         args = intent["arguments"]
         return f"已解析为报表请求：{args['period_start']} 至 {args['period_end']}，按 {args['group_by']} 汇总。"
